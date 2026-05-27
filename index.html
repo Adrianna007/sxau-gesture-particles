@@ -2,16 +2,24 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>山西农业大学 - 手势粒子交互</title>
+    <title>山西农业大学 - 增强版手势粒子交互</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; color: #fff; font-family: sans-serif; }
-        canvas { display: block; }
+        
+        /* 摄像头视频作为底层背景 */
+        .input_video { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -2; transform: scaleX(-1); /* 镜像翻转，符合直觉 */ }
+        
+        /* 黑色半透明遮罩，让粒子更清晰 */
+        .overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.7); z-index: -1; }
+        
+        /* 粒子画布 */
+        canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
+        
+        /* UI 界面 */
         #ui { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
-        h1 { font-size: 24px; margin: 0 0 10px 0; color: #4CAF50; }
-        p { margin: 5px 0; font-size: 14px; opacity: 0.8; }
-        .status-box { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border: 1px solid #333; }
-        /* 隐藏视频，MediaPipe在后台处理 */
-        .input_video { display: none; }
+        h1 { font-size: 24px; margin: 0 0 10px 0; color: #4CAF50; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        p { margin: 5px 0; font-size: 14px; opacity: 0.9; text-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+        .status-box { background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; border: 1px solid #444; backdrop-filter: blur(4px); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -19,50 +27,45 @@
 </head>
 <body>
 
+<video class="input_video" autoplay playsinline></video>
+<div class="overlay"></div>
+
 <div id="ui">
     <div class="status-box">
-        <h1>🌌 粒子手势系统</h1>
-        <p id="status-text">系统状态：正在加载摄像头模型...</p>
-        <p>当前手势：<span id="gesture-text" style="color: #00d2ff; font-weight: bold;">无</span></p>
-        <p style="margin-top: 10px; font-size: 12px; color: #aaa;">👉 操作指南：<br>1. 伸出 <b>食指</b> (手势1) -> 欢迎报考<br>2. 伸出 <b>食指+中指</b> (手势2) -> 山西农业大学<br>3. <b>大拇指和食指张合</b> -> 控制粒子收缩/扩散</p>
+        <h1>🌌 农大 AR 粒子系统</h1>
+        <p id="status-text">系统状态：正在加载 AI 模型...</p>
+        <p>当前触发：<span id="gesture-text" style="color: #00d2ff; font-weight: bold;">自由浮动</span></p>
+        <p style="margin-top: 10px; font-size: 12px; color: #ccc;">👉 互动指南：<br>
+        1. <b>手掌从上往下滑：</b> 坠入“欢迎报考”<br>
+        2. <b>手掌从左向右滑：</b> 划入“山西农业大学”<br>
+        3. <b>握紧拳头 / 张开手掌：</b> 控制粒子收缩与扩散</p>
     </div>
 </div>
 
-<video class="input_video"></video>
-
 <script>
     // ==========================================
-    // 1. 文字像素采样逻辑 (核心)
+    // 1. 文字像素采样 (获取坐标)
     // ==========================================
     function getTextCoordinates(text) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = 800;
-        canvas.height = 400;
-
-        ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.font = 'bold 80px "Microsoft YaHei", sans-serif';
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        canvas.width = 800; canvas.height = 400;
+        ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.font = 'bold 85px "Microsoft YaHei", sans-serif';
+        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
         const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
         const coordinates = [];
-
-        // 步长决定粒子密度，步长越小粒子越多
-        const step = 4; 
+        const step = 4; // 采样密度
         for (let y = 0; y < canvas.height; y += step) {
             for (let x = 0; x < canvas.width; x += step) {
                 const index = (x + y * canvas.width) * 4;
-                if (imgData[index] > 128) { // 如果像素是亮色
-                    // 转换为 Three.js 坐标系，居中对齐
+                if (imgData[index] > 128) {
                     coordinates.push(new THREE.Vector3(
                         (x - canvas.width / 2) * 0.1,
                         -(y - canvas.height / 2) * 0.1,
-                        (Math.random() - 0.5) * 5 // Z轴微微错开增加立体感
+                        (Math.random() - 0.5) * 2
                     ));
                 }
             }
@@ -71,38 +74,30 @@
     }
 
     // ==========================================
-    // 2. Three.js 场景初始化
+    // 2. Three.js 初始化设置
     // ==========================================
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.z = 40;
 
+    // 开启 Alpha 透明，让 HTML 背景的视频透过来
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // 获取三种状态的目标坐标
     const coordsText1 = getTextCoordinates("欢迎报考");
     const coordsText2 = getTextCoordinates("山西农业大学");
-    
-    // 确定最大粒子数 (取两个文字中较多的那个)
     const particleCount = Math.max(coordsText1.length, coordsText2.length);
 
     const geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
     const targetPositions = new Float32Array(particleCount * 3);
     
-    // 初始化为随机散开的球体
+    // 初始状态：散乱在空间中
     for (let i = 0; i < particleCount; i++) {
-        const r = 50 * Math.random();
-        const theta = 2 * Math.PI * Math.random();
-        const phi = Math.acos(2 * Math.random() - 1);
-        
-        positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-        positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-        positions[i * 3 + 2] = r * Math.cos(phi);
-        
-        // 初始目标设为随机
+        positions[i * 3] = (Math.random() - 0.5) * 100;
+        positions[i * 3 + 1] = (Math.random() - 0.5) * 100;
+        positions[i * 3 + 2] = (Math.random() - 0.5) * 50;
         targetPositions[i * 3] = positions[i * 3];
         targetPositions[i * 3 + 1] = positions[i * 3 + 1];
         targetPositions[i * 3 + 2] = positions[i * 3 + 2];
@@ -110,27 +105,27 @@
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     
-    // 使用带有颜色的粒子材质 (山西农大通常可以配以生机勃勃的绿色/青色调)
     const material = new THREE.PointsMaterial({ 
-        size: 0.3, 
-        color: 0x4CAF50,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending
+        size: 0.35, 
+        color: 0x4CAF50, 
+        transparent: true, 
+        opacity: 0.9, 
+        blending: THREE.AdditiveBlending 
     });
     const particles = new THREE.Points(geometry, material);
     scene.add(particles);
 
     // ==========================================
-    // 3. 状态管理与手势逻辑
+    // 3. 核心物理变量
     // ==========================================
-    let currentTargetCoords = null; // 当前要组成的文字
-    let dispersionFactor = 1.0;     // 扩散系数 (受手势张合影响)
+    let dispersionFactor = 1.0; // 粒子的张合度
+    let entryOffset = new THREE.Vector3(0, 0, 0); // 控制文字“划入”的全局偏移量
+    let currentTargetCoords = null;
+    let time = 0; // 用于实现粒子的微微浮动
 
-    // 切换粒子目标的函数
     function changeTarget(coordsArray) {
         for (let i = 0; i < particleCount; i++) {
-            const index = i % coordsArray.length; // 如果粒子多，循环利用坐标
+            const index = i % coordsArray.length;
             targetPositions[i * 3] = coordsArray[index].x;
             targetPositions[i * 3 + 1] = coordsArray[index].y;
             targetPositions[i * 3 + 2] = coordsArray[index].z;
@@ -138,79 +133,92 @@
     }
 
     // ==========================================
-    // 4. MediaPipe 手势识别接入
+    // 4. MediaPipe 手势与滑动检测
     // ==========================================
     const videoElement = document.querySelector('.input_video');
-    const statusText = document.getElementById('status-text');
     const gestureText = document.getElementById('gesture-text');
+    
+    let historyX = []; // 记录手掌X轴轨迹
+    let historyY = []; // 记录手掌Y轴轨迹
+    let swipeCooldown = 0; // 滑动冷却时间，防止连续触发
 
     function onResults(results) {
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
             
-            // 1. 计算大拇指(4)和食指(8)的距离，控制收缩与扩散
-            const thumbTip = landmarks[4];
-            const indexTip = landmarks[8];
-            const distance = Math.sqrt(
-                Math.pow(thumbTip.x - indexTip.x, 2) + 
-                Math.pow(thumbTip.y - indexTip.y, 2)
-            );
-            // 将距离映射为扩散系数 (距离越小越收缩，距离越大越散开)
-            dispersionFactor = distance * 3.0 + 0.2; 
+            // 【1】计算紧握程度 (手腕到中指尖的距离)
+            const wrist = landmarks[0];
+            const middleTip = landmarks[12];
+            const handSize = Math.sqrt(Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2));
+            
+            // 握紧时 handSize 约 0.1，张开时约 0.4+。映射到粒子的收缩(0.2)和扩散(2.5)
+            dispersionFactor = Math.max(0.2, Math.min(2.5, (handSize - 0.1) * 6.0));
 
-            // 2. 简单的手势判断逻辑 (基于 Y 坐标判断手指是否伸直)
-            const isIndexUp = landmarks[8].y < landmarks[6].y;
-            const isMiddleUp = landmarks[12].y < landmarks[10].y;
-            const isRingUp = landmarks[16].y < landmarks[14].y;
+            // 【2】滑动检测逻辑
+            const center = landmarks[9]; // 手掌中心点
+            historyX.push(center.x);
+            historyY.push(center.y);
+            
+            // 维持最近 15 帧的轨迹
+            if (historyX.length > 15) { historyX.shift(); historyY.shift(); }
+            if (swipeCooldown > 0) swipeCooldown--;
 
-            if (isIndexUp && !isMiddleUp && !isRingUp) {
-                gestureText.innerText = "1 (欢迎报考)";
-                if (currentTargetCoords !== coordsText1) {
+            // 只有当积累了足够帧数，且不在冷却中时才判断
+            if (historyX.length === 15 && swipeCooldown === 0) {
+                const dx = historyX[14] - historyX[0];
+                const dy = historyY[14] - historyY[0];
+
+                // 优先判断垂直向下滑动 (Y轴正向)
+                if (dy > 0.15 && Math.abs(dy) > Math.abs(dx)) {
+                    gestureText.innerText = "向下滑动 (欢迎报考)";
                     currentTargetCoords = coordsText1;
                     changeTarget(coordsText1);
-                }
-            } else if (isIndexUp && isMiddleUp && !isRingUp) {
-                gestureText.innerText = "2 (山西农业大学)";
-                if (currentTargetCoords !== coordsText2) {
+                    material.color.setHex(0x4CAF50);
+                    
+                    // 核心切入效果：设置起始点在屏幕正上方 (Y为正)，稍后会平滑下落到 0
+                    entryOffset.set(0, 50, 0); 
+                    swipeCooldown = 40; 
+                } 
+                // 判断水平向右滑动 (因为视频被镜像翻转了，实际手向右滑对应数据是负数)
+                else if (dx < -0.15 && Math.abs(dx) > Math.abs(dy)) {
+                    gestureText.innerText = "向右滑动 (山西农业大学)";
                     currentTargetCoords = coordsText2;
                     changeTarget(coordsText2);
-                    // 切换为农大绿
-                    material.color.setHex(0x2E8B57); 
+                    material.color.setHex(0x2E8B57); // 农大深绿
+                    
+                    // 核心切入效果：设置起始点在屏幕最左侧 (X为负)，稍后会平滑划入到 0
+                    entryOffset.set(-70, 0, 0); 
+                    swipeCooldown = 40;
                 }
-            } else {
-                gestureText.innerText = "张合控制中...";
             }
+        } else {
+            // 没有检测到手时，粒子缓慢恢复自然状态
+            dispersionFactor += (1.0 - dispersionFactor) * 0.05;
         }
     }
 
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
-    });
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
     hands.onResults(onResults);
 
     const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
-        width: 640,
-        height: 480
+        onFrame: async () => { await hands.send({image: videoElement}); },
+        width: 1280, height: 720
     });
     cameraUtils.start().then(() => {
-        statusText.innerText = "系统状态：摄像头已就绪";
-        statusText.style.color = "#4CAF50";
+        document.getElementById('status-text').innerText = "系统状态：摄像头已就绪";
+        document.getElementById('status-text').style.color = "#4CAF50";
     });
 
     // ==========================================
-    // 5. 动画渲染循环 (缓动插值)
+    // 5. 动画渲染循环
     // ==========================================
     function animate() {
         requestAnimationFrame(animate);
+        time += 0.05;
+
+        // 让全局偏移量不断向 (0,0,0) 靠拢，实现“滑动切入并停留在中心”的效果
+        entryOffset.lerp(new THREE.Vector3(0, 0, 0), 0.06);
 
         const posAttr = geometry.attributes.position;
         const currentArr = posAttr.array;
@@ -220,29 +228,33 @@
             const idxY = i * 3 + 1;
             const idxZ = i * 3 + 2;
 
-            // 目标位置叠加扩散扰动 (dispersionFactor)
-            const targetX = targetPositions[idxX] * dispersionFactor;
-            const targetY = targetPositions[idxY] * dispersionFactor;
-            const targetZ = targetPositions[idxZ] * dispersionFactor;
+            // 1. 获取目标点并加上手掌张合的扩散因子
+            let targetX = targetPositions[idxX] * dispersionFactor;
+            let targetY = targetPositions[idxY] * dispersionFactor;
+            let targetZ = targetPositions[idxZ] * dispersionFactor;
 
-            // 线性插值 (Lerp)，0.05 决定了粒子飞行的速度，数值越大飞得越快
-            currentArr[idxX] += (targetX - currentArr[idxX]) * 0.05;
-            currentArr[idxY] += (targetY - currentArr[idxY]) * 0.05;
-            currentArr[idxZ] += (targetZ - currentArr[idxZ]) * 0.05;
+            // 2. 加上“划入”的整体物理偏移
+            targetX += entryOffset.x;
+            targetY += entryOffset.y;
+            targetZ += entryOffset.z;
+
+            // 3. 给每个粒子加上轻微的正弦波扰动，产生悬浮呼吸感 (替代掉原来的生硬旋转)
+            targetY += Math.sin(time + i * 0.05) * 0.4;
+            targetX += Math.cos(time + i * 0.05) * 0.2;
+
+            // 4. 平滑插值 (Lerp) 当前坐标到目标坐标
+            currentArr[idxX] += (targetX - currentArr[idxX]) * 0.1;
+            currentArr[idxY] += (targetY - currentArr[idxY]) * 0.1;
+            currentArr[idxZ] += (targetZ - currentArr[idxZ]) * 0.1;
         }
 
         posAttr.needsUpdate = true;
-        
-        // 场景缓慢旋转，增加高级感
-        particles.rotation.y += 0.002;
-        particles.rotation.x = Math.sin(Date.now() * 0.001) * 0.1;
-
         renderer.render(scene, camera);
     }
 
     animate();
 
-    // 监听窗口缩放
+    // 窗口缩放适配
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
