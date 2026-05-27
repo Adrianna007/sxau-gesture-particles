@@ -208,4 +208,97 @@
             const wrist = landmarks[0];
             const middleTip = landmarks[12];
             const handSize = Math.sqrt(Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2));
-            dispersionFactor = Math.max(0.2, Math.min(3.0, (handSize
+            dispersionFactor = Math.max(0.2, Math.min(3.0, (handSize - 0.1) * 7.0));
+
+            const center = landmarks[9]; 
+            historyX.push(center.x); historyY.push(center.y);
+            if (historyX.length > 15) { historyX.shift(); historyY.shift(); }
+            if (swipeCooldown > 0) swipeCooldown--;
+
+            if (historyX.length === 15 && swipeCooldown === 0) {
+                const dx = historyX[14] - historyX[0];
+                const dy = historyY[14] - historyY[0];
+
+                if (dy > 0.15 && Math.abs(dy) > Math.abs(dx)) {
+                    gestureText.innerText = "向下滑动 (欢迎报考)";
+                    currentTargetCoords = coordsText1;
+                    // 从青色(0.4)渐变到蓝色(0.6)
+                    changeTarget(coordsText1, 0.4, 0.6); 
+                    entryOffset.set(0, 50, 0); 
+                    swipeCooldown = 40; 
+                } 
+                else if (dx < -0.15 && Math.abs(dx) > Math.abs(dy)) {
+                    gestureText.innerText = "向右滑动 (山西农业大学)";
+                    currentTargetCoords = coordsText2;
+                    // 从绿色(0.3)渐变到翠绿色(0.45)
+                    changeTarget(coordsText2, 0.25, 0.45); 
+                    entryOffset.set(-70, 0, 0); 
+                    swipeCooldown = 40;
+                }
+            }
+        } else {
+            dispersionFactor += (1.0 - dispersionFactor) * 0.05;
+        }
+    }
+
+    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
+    hands.onResults(onResults);
+
+    const cameraUtils = new Camera(videoElement, {
+        onFrame: async () => { await hands.send({image: videoElement}); },
+        width: 1280, height: 720
+    });
+    cameraUtils.start().then(() => {
+        document.getElementById('status-text').innerText = "系统状态：摄像头已就绪，AI全速运行";
+        document.getElementById('status-text').style.color = "#00FF87";
+    });
+
+    // ==========================================
+    // 7. 动画渲染循环
+    // ==========================================
+    function animate() {
+        requestAnimationFrame(animate);
+        time += 0.05;
+
+        // 背景星空持续缓慢旋转、漂浮
+        bgParticles.rotation.y += 0.001;
+        bgParticles.rotation.x += 0.0005;
+
+        entryOffset.lerp(new THREE.Vector3(0, 0, 0), 0.06);
+
+        const posAttr = geometry.attributes.position;
+        const currentArr = posAttr.array;
+
+        for (let i = 0; i < particleCount; i++) {
+            const idxX = i * 3;
+            const idxY = i * 3 + 1;
+            const idxZ = i * 3 + 2;
+
+            let targetX = targetPositions[idxX] * dispersionFactor + entryOffset.x;
+            let targetY = targetPositions[idxY] * dispersionFactor + entryOffset.y;
+            let targetZ = targetPositions[idxZ] * dispersionFactor + entryOffset.z;
+
+            // 微弱悬浮呼吸感
+            targetY += Math.sin(time + i * 0.05) * 0.4;
+            targetX += Math.cos(time + i * 0.05) * 0.2;
+
+            currentArr[idxX] += (targetX - currentArr[idxX]) * 0.12;
+            currentArr[idxY] += (targetY - currentArr[idxY]) * 0.12;
+            currentArr[idxZ] += (targetZ - currentArr[idxZ]) * 0.12;
+        }
+
+        posAttr.needsUpdate = true;
+        renderer.render(scene, camera);
+    }
+
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+</script>
+</body>
+</html>
