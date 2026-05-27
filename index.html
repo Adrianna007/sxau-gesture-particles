@@ -2,17 +2,17 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>山西农业大学 - 震撼粒子空间</title>
+    <title>山西农业大学 - 指尖力场交互系统</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #000; color: #fff; font-family: sans-serif; }
         .input_video { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -2; transform: scaleX(-1); }
-        .overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: -1; } /* 颜色加深，突出粒子发光 */
+        .overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: -1; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
         
         #ui { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
-        h1 { font-size: 26px; margin: 0 0 10px 0; background: linear-gradient(90deg, #00FF87, #FF007F); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 2px 10px rgba(255,0,127,0.4); }
+        h1 { font-size: 26px; margin: 0 0 10px 0; background: linear-gradient(90deg, #00FF87, #00d2ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 2px 8px rgba(0,255,135,0.4); }
         p { margin: 5px 0; font-size: 15px; opacity: 0.9; text-shadow: 0 2px 4px rgba(0,0,0,1); }
-        .status-box { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 12px; border: 1px solid #555; backdrop-filter: blur(10px); box-shadow: 0 0 30px rgba(0,255,135,0.2); }
+        .status-box { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 12px; border: 1px solid #555; backdrop-filter: blur(10px); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -25,27 +25,45 @@
 
 <div id="ui">
     <div class="status-box">
-        <h1>🌌 震撼粒子空间</h1>
+        <h1>🌌 农大指尖力场系统</h1>
         <p id="status-text">系统状态：AI 视觉模型初始化中...</p>
-        <p>当前触发：<span id="gesture-text" style="color: #FF007F; font-weight: bold; font-size: 18px;">等待大幅度动作</span></p>
-        <p style="margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.6;">👉 <b>高稳定互动指南：</b><br>
-        1. <b>大幅度从上往下滑：</b> 坠入“欢迎报考”<br>
-        2. <b>大幅度从左向右滑：</b> 划入“山西农业大学”<br>
-        3. <b>缓慢握拳 / 张开：</b> 柔和控制粒子收缩扩散</p>
+        <p>当前触发：<span id="gesture-text" style="color: #00FFFF; font-weight: bold; font-size: 18px;">欢迎报考</span></p>
+        <p style="margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.6;">👉 <b>高阶互动指南：</b><br>
+        1. <b>指尖拨动：</b> 食指在空中划过，拨开粒子<br>
+        2. <b>大幅上下滑：</b> 切换“欢迎报考”<br>
+        3. <b>大幅左右滑：</b> 切换“山西农业大学”<br>
+        4. <b>微距张合：</b> 柔和控制整体缩放 (幅度已缩小)</p>
     </div>
 </div>
 
 <script>
     // ==========================================
-    // 1. 文字像素采样 (保持高浓度)
+    // 0. 生成圆形发光纹理 (解决粒子变大后的方块感)
+    // ==========================================
+    function createCircleTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
+        gradient.addColorStop(0, 'rgba(255,255,255,1)');
+        gradient.addColorStop(0.5, 'rgba(255,255,255,0.8)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
+        return new THREE.CanvasTexture(canvas);
+    }
+    const particleTexture = createCircleTexture();
+
+    // ==========================================
+    // 1. 文字像素采样
     // ==========================================
     function getTextCoordinates(text) {
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        canvas.width = 900; canvas.height = 400; // 加宽画布，防止文字被裁
+        canvas.width = 900; canvas.height = 400; 
         ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        ctx.font = '900 95px "Microsoft YaHei", sans-serif'; // 字体更粗大
+        ctx.font = '900 95px "Microsoft YaHei", sans-serif'; 
         ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
@@ -57,9 +75,9 @@
                 const index = (x + y * canvas.width) * 4;
                 if (imgData[index] > 128) {
                     coordinates.push(new THREE.Vector3(
-                        (x - canvas.width / 2) * 0.12, // 间距微调，让字更大
+                        (x - canvas.width / 2) * 0.12, 
                         -(y - canvas.height / 2) * 0.12,
-                        (Math.random() - 0.5) * 3 // Z轴厚度增加
+                        (Math.random() - 0.5) * 4 
                     ));
                 }
             }
@@ -72,15 +90,15 @@
     // ==========================================
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 45; // 镜头拉远一点，容纳更震撼的视觉
+    camera.position.z = 45; 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     // ==========================================
-    // 3. 背景星空粒子系统 (更明亮)
+    // 3. 修复并强化背景粒子 (变大 3 倍)
     // ==========================================
-    const bgParticleCount = 4000;
+    const bgParticleCount = 3500;
     const bgGeometry = new THREE.BufferGeometry();
     const bgPositions = new Float32Array(bgParticleCount * 3);
     const bgColors = new Float32Array(bgParticleCount * 3);
@@ -89,9 +107,8 @@
     for (let i = 0; i < bgParticleCount; i++) {
         bgPositions[i * 3] = (Math.random() - 0.5) * 400;
         bgPositions[i * 3 + 1] = (Math.random() - 0.5) * 400;
-        bgPositions[i * 3 + 2] = (Math.random() - 0.5) * 200 - 80; 
+        bgPositions[i * 3 + 2] = (Math.random() - 0.5) * 200 - 60; 
 
-        // 背景粒子偏向粉色、紫色、青色
         colorHelper.setHSL(Math.random() * 0.5 + 0.5, 0.9, 0.6);
         bgColors[i * 3] = colorHelper.r;
         bgColors[i * 3 + 1] = colorHelper.g;
@@ -101,17 +118,20 @@
     bgGeometry.setAttribute('color', new THREE.BufferAttribute(bgColors, 3));
 
     const bgMaterial = new THREE.PointsMaterial({
-        size: 0.4, // 背景星星变大
+        size: 1.2, // 【需求2】背景粒子变大 3 倍
+        color: 0xffffff, // 修复：必须加白底才能显现顶点颜色
+        map: particleTexture, // 加载圆形发光纹理
         vertexColors: true,
         transparent: true,
-        opacity: 0.6,
-        blending: THREE.AdditiveBlending
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
     });
     const bgParticles = new THREE.Points(bgGeometry, bgMaterial);
     scene.add(bgParticles);
 
     // ==========================================
-    // 4. 主干文字粒子系统 (颗粒变大，更夺目)
+    // 4. 主干文字粒子系统 (变大 3 倍)
     // ==========================================
     const coordsText1 = getTextCoordinates("欢迎报考");
     const coordsText2 = getTextCoordinates("山西农业大学");
@@ -126,40 +146,41 @@
         positions[i * 3] = (Math.random() - 0.5) * 200;
         positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
         positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+        // 初始目标先乱放，马上会在下面覆盖
         targetPositions[i * 3] = positions[i * 3];
         targetPositions[i * 3 + 1] = positions[i * 3 + 1];
         targetPositions[i * 3 + 2] = positions[i * 3 + 2];
-        
-        colorHelper.setHSL(0.5, 1.0, 0.5);
-        colors[i * 3] = colorHelper.r;
-        colors[i * 3 + 1] = colorHelper.g;
-        colors[i * 3 + 2] = colorHelper.b;
     }
 
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     
     const material = new THREE.PointsMaterial({ 
-        size: 0.35, // 【改动】单颗文字粒子变大，增强厚重感和发光感
+        size: 1.05, // 【需求2】文字粒子变大 3 倍
+        color: 0xffffff, // 修复：确保渐变色不被变暗
+        map: particleTexture, // 加载圆形发光纹理
         vertexColors: true, 
         transparent: true, 
         opacity: 1.0, 
-        blending: THREE.AdditiveBlending 
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
     });
     const particles = new THREE.Points(geometry, material);
     scene.add(particles);
 
     // ==========================================
-    // 5. 核心物理与状态变量
+    // 5. 核心控制变量与【初始化展示】
     // ==========================================
-    let targetDispersion = 1.0;  // 目标张合度 (手势直接控制)
-    let smoothedDispersion = 1.0; // 平滑后的张合度 (实际渲染用，防抖动)
-    
+    let targetDispersion = 1.0; 
+    let smoothedDispersion = 1.0; 
     let entryOffset = new THREE.Vector3(0, 0, 0); 
-    let currentTargetCoords = null;
     let time = 0; 
+    
+    // 指尖交互专用变量
+    let pointerWorld = new THREE.Vector3(0, 0, 1000); 
+    let pointerActive = false;
 
-    // 切换目标并计算极高对比度的渐变色
+    // 动态换色函数
     function changeTarget(coordsArray, hueStart, hueEnd) {
         const colorAttr = geometry.attributes.color;
         let minX = Infinity, maxX = -Infinity;
@@ -175,10 +196,9 @@
             targetPositions[i * 3 + 1] = coordsArray[index].y;
             targetPositions[i * 3 + 2] = coordsArray[index].z;
 
-            // 流光渐变色
             const ratio = (targetX - minX) / (maxX - minX); 
             const currentHue = hueStart + ratio * (hueEnd - hueStart);
-            colorHelper.setHSL(currentHue, 1.0, 0.55); // 提高亮度
+            colorHelper.setHSL(currentHue, 1.0, 0.6); 
             
             colorAttr.array[i * 3] = colorHelper.r;
             colorAttr.array[i * 3 + 1] = colorHelper.g;
@@ -187,64 +207,69 @@
         colorAttr.needsUpdate = true;
     }
 
+    // 修复：一打开网页就执行第一次换字，防止单色散乱
+    changeTarget(coordsText1, 0.5, 0.85); 
+
     // ==========================================
-    // 6. MediaPipe 手势与滑动检测 (降低灵敏度)
+    // 6. MediaPipe 追踪 (包含指尖定位)
     // ==========================================
     const videoElement = document.querySelector('.input_video');
     const gestureText = document.getElementById('gesture-text');
     let historyX = []; let historyY = []; let swipeCooldown = 0; 
 
+    // 用于计算 3D 视野范围，将 2D 坐标转换为 3D 坐标
+    let vFov = 75 * Math.PI / 180;
+    let vHeight = 2 * Math.tan(vFov / 2) * 45; // camera.z = 45
+    let vWidth = vHeight * (window.innerWidth / window.innerHeight);
+
     function onResults(results) {
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
             const landmarks = results.multiHandLandmarks[0];
             
-            // 【灵敏度修改 1】手势张合度计算
+            // --- 【新增：指尖避开效应定位】 ---
+            const indexTip = landmarks[8]; // 提取食指尖端
+            // 考虑了镜像反转的影响
+            pointerWorld.x = (0.5 - indexTip.x) * vWidth; 
+            pointerWorld.y = -(indexTip.y - 0.5) * vHeight;
+            pointerWorld.z = 0;
+            pointerActive = true;
+
+            // --- 【需求 2：缩放幅度降为 1/3】 ---
             const wrist = landmarks[0];
             const middleTip = landmarks[12];
             const handSize = Math.sqrt(Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2));
-            
-            // 计算目标扩散值，但不再直接赋给粒子，而是存起来用于稍后的平滑过渡
-            targetDispersion = Math.max(0.1, Math.min(3.5, (handSize - 0.1) * 6.0));
+            // 原来的范围是 0.1 到 3.5。现在限制在 0.7(微缩) 到 1.5(微扩) 之间
+            targetDispersion = Math.max(0.7, Math.min(1.5, (handSize - 0.1) * 2.5 + 0.7));
 
-            // 【灵敏度修改 2】滑动检测逻辑
+            // --- 滑动检测逻辑 (保持稳定) ---
             const center = landmarks[9]; 
             historyX.push(center.x); historyY.push(center.y);
-            if (historyX.length > 20) { historyX.shift(); historyY.shift(); } // 延长轨迹判断帧数
+            if (historyX.length > 20) { historyX.shift(); historyY.shift(); } 
             
             if (swipeCooldown > 0) swipeCooldown--;
 
-            // 只有当积累了足够帧数，且不在冷却中时才判断
             if (historyX.length === 20 && swipeCooldown === 0) {
                 const dx = historyX[19] - historyX[0];
                 const dy = historyY[19] - historyY[0];
 
-                // 阈值从 0.15 提高到 0.28，必须有大幅度的挥手动作才会触发！
                 if (dy > 0.28 && Math.abs(dy) > Math.abs(dx)) {
-                    gestureText.innerText = "向下滑动 (欢迎报考)";
+                    gestureText.innerText = "欢迎报考";
                     gestureText.style.color = "#00FFFF";
-                    currentTargetCoords = coordsText1;
-                    
-                    // 【视觉强化】青蓝色 渐变到 紫红色
                     changeTarget(coordsText1, 0.5, 0.85); 
                     entryOffset.set(0, 60, 0); 
-                    
-                    // 冷却时间延长到 60 帧 (约2秒)，防止一次挥手触发多次
                     swipeCooldown = 60; 
                 } 
                 else if (dx < -0.28 && Math.abs(dx) > Math.abs(dy)) {
-                    gestureText.innerText = "向右滑动 (山西农业大学)";
+                    gestureText.innerText = "山西农业大学";
                     gestureText.style.color = "#FFD700";
-                    currentTargetCoords = coordsText2;
-                    
-                    // 【视觉强化】金黄色 渐变到 烈焰红
                     changeTarget(coordsText2, 0.12, 0.0); 
                     entryOffset.set(-80, 0, 0); 
                     swipeCooldown = 60;
                 }
             }
         } else {
-            // 没有手时，目标状态恢复正常
             targetDispersion = 1.0;
+            pointerActive = false; // 手离开时关闭排斥力场
         }
     }
 
@@ -257,24 +282,21 @@
         width: 1280, height: 720
     });
     cameraUtils.start().then(() => {
-        document.getElementById('status-text').innerText = "系统状态：AI 引擎全速运行中";
+        document.getElementById('status-text').innerText = "系统状态：力场捕捉全速运行中";
         document.getElementById('status-text').style.color = "#00FF87";
     });
 
     // ==========================================
-    // 7. 动画渲染循环
+    // 7. 动画渲染循环 (含指尖物理运算)
     // ==========================================
     function animate() {
         requestAnimationFrame(animate);
         time += 0.05;
 
-        // 背景星空持续缓慢旋转、漂浮
         bgParticles.rotation.y += 0.001;
         bgParticles.rotation.x += 0.0005;
 
         entryOffset.lerp(new THREE.Vector3(0, 0, 0), 0.06);
-
-        // 【灵敏度核心防抖】让实际的张合度，缓慢去追赶目标张合度，彻底消除握拳时的画面闪烁
         smoothedDispersion += (targetDispersion - smoothedDispersion) * 0.08;
 
         const posAttr = geometry.attributes.position;
@@ -285,12 +307,27 @@
             const idxY = i * 3 + 1;
             const idxZ = i * 3 + 2;
 
-            // 应用平滑后的张合度
             let targetX = targetPositions[idxX] * smoothedDispersion + entryOffset.x;
             let targetY = targetPositions[idxY] * smoothedDispersion + entryOffset.y;
             let targetZ = targetPositions[idxZ] * smoothedDispersion + entryOffset.z;
 
-            // 【视觉强化】极其明显的深水波浪浮动！振幅从 0.4 提升到了 1.5
+            // --- 【核心新增：指尖排斥力场】 ---
+            if (pointerActive) {
+                const dx = currentArr[idxX] - pointerWorld.x;
+                const dy = currentArr[idxY] - pointerWorld.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const repelRadius = 22.0; // 影响半径
+                
+                if (dist < repelRadius && dist > 0.1) {
+                    // 距离越近，排斥力越大 (二次方曲线过渡更自然)
+                    const force = Math.pow((repelRadius - dist) / repelRadius, 2); 
+                    targetX += (dx / dist) * force * 15.0; // 向四周推开
+                    targetY += (dy / dist) * force * 15.0;
+                    targetZ += force * 12.0; // 顺便往前凸起，增加立体感
+                }
+            }
+
+            // 基础的水波悬浮感
             targetY += Math.sin(time + i * 0.02) * 1.5;
             targetX += Math.cos(time + i * 0.02) * 0.8;
 
@@ -309,6 +346,9 @@
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        // 同步更新 3D 视野宽高
+        vHeight = 2 * Math.tan(vFov / 2) * 45;
+        vWidth = vHeight * (window.innerWidth / window.innerHeight);
     });
 </script>
 </body>
