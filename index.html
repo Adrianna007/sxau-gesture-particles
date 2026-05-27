@@ -2,354 +2,110 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>山西农业大学 - 指尖力场交互系统</title>
+    <title>农大交互粒子系统</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; color: #fff; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #000; }
         .input_video { display: block; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; object-fit: cover; z-index: -2; transform: scaleX(-1); }
-        .overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.85); z-index: -1; }
+        .overlay { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.88); z-index: -1; }
         canvas { display: block; position: absolute; top: 0; left: 0; z-index: 1; pointer-events: none; }
-        
-        #ui { position: absolute; top: 20px; left: 20px; z-index: 10; pointer-events: none; }
-        h1 { font-size: 26px; margin: 0 0 10px 0; background: linear-gradient(90deg, #00FF87, #00d2ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 2px 8px rgba(0,255,135,0.4); }
-        p { margin: 5px 0; font-size: 15px; opacity: 0.9; text-shadow: 0 2px 4px rgba(0,0,0,1); }
-        .status-box { background: rgba(0,0,0,0.6); padding: 15px; border-radius: 12px; border: 1px solid #555; backdrop-filter: blur(10px); }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
-
 <video class="input_video" autoplay playsinline></video>
 <div class="overlay"></div>
 
-<div id="ui">
-    <div class="status-box">
-        <h1>🌌 农大指尖力场系统</h1>
-        <p id="status-text">系统状态：AI 视觉模型初始化中...</p>
-        <p>当前触发：<span id="gesture-text" style="color: #00FFFF; font-weight: bold; font-size: 18px;">欢迎报考</span></p>
-        <p style="margin-top: 10px; font-size: 13px; color: #ddd; line-height: 1.6;">👉 <b>高阶互动指南：</b><br>
-        1. <b>指尖拨动：</b> 食指在空中划过，拨开粒子<br>
-        2. <b>大幅上下滑：</b> 切换“欢迎报考”<br>
-        3. <b>大幅左右滑：</b> 切换“山西农业大学”<br>
-        4. <b>微距张合：</b> 柔和控制整体缩放 (幅度已缩小)</p>
-    </div>
-</div>
-
 <script>
-    // ==========================================
-    // 0. 生成圆形发光纹理 (解决粒子变大后的方块感)
-    // ==========================================
-    function createCircleTexture() {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64; canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 30);
-        gradient.addColorStop(0, 'rgba(255,255,255,1)');
-        gradient.addColorStop(0.5, 'rgba(255,255,255,0.8)');
-        gradient.addColorStop(1, 'rgba(255,255,255,0)');
-        ctx.fillStyle = gradient;
-        ctx.beginPath(); ctx.arc(32, 32, 32, 0, Math.PI * 2); ctx.fill();
-        return new THREE.CanvasTexture(canvas);
-    }
-    const particleTexture = createCircleTexture();
-
-    // ==========================================
-    // 1. 文字像素采样
-    // ==========================================
-    function getTextCoordinates(text) {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = 900; canvas.height = 400; 
-        ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        ctx.font = '900 95px "Microsoft YaHei", sans-serif'; 
-        ctx.fillStyle = '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-        const coordinates = [];
-        const step = 2; 
-        for (let y = 0; y < canvas.height; y += step) {
-            for (let x = 0; x < canvas.width; x += step) {
-                const index = (x + y * canvas.width) * 4;
-                if (imgData[index] > 128) {
-                    coordinates.push(new THREE.Vector3(
-                        (x - canvas.width / 2) * 0.12, 
-                        -(y - canvas.height / 2) * 0.12,
-                        (Math.random() - 0.5) * 4 
-                    ));
-                }
-            }
-        }
-        return coordinates;
-    }
-
-    // ==========================================
-    // 2. Three.js 初始化
-    // ==========================================
+    // 1. 初始化场景与纹理
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 45; 
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    camera.position.z = 50;
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
-    // ==========================================
-    // 3. 修复并强化背景粒子 (变大 3 倍)
-    // ==========================================
-    const bgParticleCount = 3500;
-    const bgGeometry = new THREE.BufferGeometry();
-    const bgPositions = new Float32Array(bgParticleCount * 3);
-    const bgColors = new Float32Array(bgParticleCount * 3);
-    const colorHelper = new THREE.Color();
-
-    for (let i = 0; i < bgParticleCount; i++) {
-        bgPositions[i * 3] = (Math.random() - 0.5) * 400;
-        bgPositions[i * 3 + 1] = (Math.random() - 0.5) * 400;
-        bgPositions[i * 3 + 2] = (Math.random() - 0.5) * 200 - 60; 
-
-        colorHelper.setHSL(Math.random() * 0.5 + 0.5, 0.9, 0.6);
-        bgColors[i * 3] = colorHelper.r;
-        bgColors[i * 3 + 1] = colorHelper.g;
-        bgColors[i * 3 + 2] = colorHelper.b;
-    }
-    bgGeometry.setAttribute('position', new THREE.BufferAttribute(bgPositions, 3));
-    bgGeometry.setAttribute('color', new THREE.BufferAttribute(bgColors, 3));
-
-    const bgMaterial = new THREE.PointsMaterial({
-        size: 1.2, // 【需求2】背景粒子变大 3 倍
-        color: 0xffffff, // 修复：必须加白底才能显现顶点颜色
-        map: particleTexture, // 加载圆形发光纹理
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.7,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    });
-    const bgParticles = new THREE.Points(bgGeometry, bgMaterial);
-    scene.add(bgParticles);
-
-    // ==========================================
-    // 4. 主干文字粒子系统 (变大 3 倍)
-    // ==========================================
-    const coordsText1 = getTextCoordinates("欢迎报考");
-    const coordsText2 = getTextCoordinates("山西农业大学");
-    const particleCount = Math.max(coordsText1.length, coordsText2.length);
-
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const targetPositions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-    
-    for (let i = 0; i < particleCount; i++) {
-        positions[i * 3] = (Math.random() - 0.5) * 200;
-        positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
-        positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
-        // 初始目标先乱放，马上会在下面覆盖
-        targetPositions[i * 3] = positions[i * 3];
-        targetPositions[i * 3 + 1] = positions[i * 3 + 1];
-        targetPositions[i * 3 + 2] = positions[i * 3 + 2];
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    
-    const material = new THREE.PointsMaterial({ 
-        size: 1.05, // 【需求2】文字粒子变大 3 倍
-        color: 0xffffff, // 修复：确保渐变色不被变暗
-        map: particleTexture, // 加载圆形发光纹理
-        vertexColors: true, 
-        transparent: true, 
-        opacity: 1.0, 
-        blending: THREE.AdditiveBlending,
-        depthWrite: false
-    });
-    const particles = new THREE.Points(geometry, material);
-    scene.add(particles);
-
-    // ==========================================
-    // 5. 核心控制变量与【初始化展示】
-    // ==========================================
-    let targetDispersion = 1.0; 
-    let smoothedDispersion = 1.0; 
-    let entryOffset = new THREE.Vector3(0, 0, 0); 
-    let time = 0; 
-    
-    // 指尖交互专用变量
-    let pointerWorld = new THREE.Vector3(0, 0, 1000); 
-    let pointerActive = false;
-
-    // 动态换色函数
-    function changeTarget(coordsArray, hueStart, hueEnd) {
-        const colorAttr = geometry.attributes.color;
-        let minX = Infinity, maxX = -Infinity;
-        coordsArray.forEach(p => {
-            if (p.x < minX) minX = p.x;
-            if (p.x > maxX) maxX = p.x;
-        });
-
-        for (let i = 0; i < particleCount; i++) {
-            const index = i % coordsArray.length;
-            const targetX = coordsArray[index].x;
-            targetPositions[i * 3] = targetX;
-            targetPositions[i * 3 + 1] = coordsArray[index].y;
-            targetPositions[i * 3 + 2] = coordsArray[index].z;
-
-            const ratio = (targetX - minX) / (maxX - minX); 
-            const currentHue = hueStart + ratio * (hueEnd - hueStart);
-            colorHelper.setHSL(currentHue, 1.0, 0.6); 
-            
-            colorAttr.array[i * 3] = colorHelper.r;
-            colorAttr.array[i * 3 + 1] = colorHelper.g;
-            colorAttr.array[i * 3 + 2] = colorHelper.b;
-        }
-        colorAttr.needsUpdate = true;
-    }
-
-    // 修复：一打开网页就执行第一次换字，防止单色散乱
-    changeTarget(coordsText1, 0.5, 0.85); 
-
-    // ==========================================
-    // 6. MediaPipe 追踪 (包含指尖定位)
-    // ==========================================
-    const videoElement = document.querySelector('.input_video');
-    const gestureText = document.getElementById('gesture-text');
-    let historyX = []; let historyY = []; let swipeCooldown = 0; 
-
-    // 用于计算 3D 视野范围，将 2D 坐标转换为 3D 坐标
-    let vFov = 75 * Math.PI / 180;
-    let vHeight = 2 * Math.tan(vFov / 2) * 45; // camera.z = 45
-    let vWidth = vHeight * (window.innerWidth / window.innerHeight);
-
-    function onResults(results) {
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-            
-            // --- 【新增：指尖避开效应定位】 ---
-            const indexTip = landmarks[8]; // 提取食指尖端
-            // 考虑了镜像反转的影响
-            pointerWorld.x = (0.5 - indexTip.x) * vWidth; 
-            pointerWorld.y = -(indexTip.y - 0.5) * vHeight;
-            pointerWorld.z = 0;
-            pointerActive = true;
-
-            // --- 【需求 2：缩放幅度降为 1/3】 ---
-            const wrist = landmarks[0];
-            const middleTip = landmarks[12];
-            const handSize = Math.sqrt(Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2));
-            // 原来的范围是 0.1 到 3.5。现在限制在 0.7(微缩) 到 1.5(微扩) 之间
-            targetDispersion = Math.max(0.7, Math.min(1.5, (handSize - 0.1) * 2.5 + 0.7));
-
-            // --- 滑动检测逻辑 (保持稳定) ---
-            const center = landmarks[9]; 
-            historyX.push(center.x); historyY.push(center.y);
-            if (historyX.length > 20) { historyX.shift(); historyY.shift(); } 
-            
-            if (swipeCooldown > 0) swipeCooldown--;
-
-            if (historyX.length === 20 && swipeCooldown === 0) {
-                const dx = historyX[19] - historyX[0];
-                const dy = historyY[19] - historyY[0];
-
-                if (dy > 0.28 && Math.abs(dy) > Math.abs(dx)) {
-                    gestureText.innerText = "欢迎报考";
-                    gestureText.style.color = "#00FFFF";
-                    changeTarget(coordsText1, 0.5, 0.85); 
-                    entryOffset.set(0, 60, 0); 
-                    swipeCooldown = 60; 
-                } 
-                else if (dx < -0.28 && Math.abs(dx) > Math.abs(dy)) {
-                    gestureText.innerText = "山西农业大学";
-                    gestureText.style.color = "#FFD700";
-                    changeTarget(coordsText2, 0.12, 0.0); 
-                    entryOffset.set(-80, 0, 0); 
-                    swipeCooldown = 60;
+    // 2. 文字像素采样 (精准控制占比: 2/3 宽，1/3 高)
+    function getTextCoordinates(text, colorHex) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1200; canvas.height = 600;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0, canvas.width, canvas.height);
+        ctx.font = 'bold 150px sans-serif';
+        ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(text, 600, 300);
+        
+        const imgData = ctx.getImageData(0,0, 1200, 600).data;
+        const coords = [];
+        for(let y=0; y<600; y+=3) {
+            for(let x=0; x<1200; x+=3) {
+                if(imgData[(x+y*1200)*4] > 128) {
+                    coords.push({
+                        x: (x - 600) * 0.25, // 宽度系数
+                        y: -(y - 300) * 0.18, // 高度系数
+                        z: (Math.random()-0.5)*2,
+                        color: new THREE.Color(colorHex)
+                    });
                 }
             }
-        } else {
-            targetDispersion = 1.0;
-            pointerActive = false; // 手离开时关闭排斥力场
         }
+        return coords;
     }
 
-    const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
-    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.7 });
-    hands.onResults(onResults);
+    const data1 = getTextCoordinates("欢迎报考", 0xFFFF00); // 黄色
+    const data2 = getTextCoordinates("山西农业大学", 0xFF0000); // 红色
+    
+    let currentData = data1;
+    const geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array(Math.max(data1.length, data2.length) * 3);
+    const colors = new Float32Array(Math.max(data1.length, data2.length) * 3);
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-    const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => { await hands.send({image: videoElement}); },
-        width: 1280, height: 720
-    });
-    cameraUtils.start().then(() => {
-        document.getElementById('status-text').innerText = "系统状态：力场捕捉全速运行中";
-        document.getElementById('status-text').style.color = "#00FF87";
-    });
+    const material = new THREE.PointsMaterial({ size: 1.5, vertexColors: true, blending: THREE.AdditiveBlending, transparent: true });
+    const points = new THREE.Points(geometry, material);
+    scene.add(points);
 
-    // ==========================================
-    // 7. 动画渲染循环 (含指尖物理运算)
-    // ==========================================
+    // 3. MediaPipe 交互逻辑
+    let pointer = new THREE.Vector3(0,0,0);
+    const hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.onResults(results => {
+        if(results.multiHandLandmarks?.length > 0) {
+            const h = results.multiHandLandmarks[0];
+            // 指尖避让
+            pointer.set((0.5-h[8].x)*50, -(h[8].y-0.5)*30, 0);
+            
+            // 握拳判断 (简易距离判断)
+            const d = Math.hypot(h[4].x - h[8].x, h[4].y - h[8].y);
+            currentData = d < 0.15 ? data1 : data2;
+        }
+    });
+    
+    new Camera(document.querySelector('video'), { onFrame: async () => await hands.send({image: document.querySelector('video')}) }).start();
+
+    // 4. 渲染循环
     function animate() {
         requestAnimationFrame(animate);
-        time += 0.05;
-
-        bgParticles.rotation.y += 0.001;
-        bgParticles.rotation.x += 0.0005;
-
-        entryOffset.lerp(new THREE.Vector3(0, 0, 0), 0.06);
-        smoothedDispersion += (targetDispersion - smoothedDispersion) * 0.08;
-
-        const posAttr = geometry.attributes.position;
-        const currentArr = posAttr.array;
-
-        for (let i = 0; i < particleCount; i++) {
-            const idxX = i * 3;
-            const idxY = i * 3 + 1;
-            const idxZ = i * 3 + 2;
-
-            let targetX = targetPositions[idxX] * smoothedDispersion + entryOffset.x;
-            let targetY = targetPositions[idxY] * smoothedDispersion + entryOffset.y;
-            let targetZ = targetPositions[idxZ] * smoothedDispersion + entryOffset.z;
-
-            // --- 【核心新增：指尖排斥力场】 ---
-            if (pointerActive) {
-                const dx = currentArr[idxX] - pointerWorld.x;
-                const dy = currentArr[idxY] - pointerWorld.y;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const repelRadius = 22.0; // 影响半径
-                
-                if (dist < repelRadius && dist > 0.1) {
-                    // 距离越近，排斥力越大 (二次方曲线过渡更自然)
-                    const force = Math.pow((repelRadius - dist) / repelRadius, 2); 
-                    targetX += (dx / dist) * force * 15.0; // 向四周推开
-                    targetY += (dy / dist) * force * 15.0;
-                    targetZ += force * 12.0; // 顺便往前凸起，增加立体感
-                }
+        const p = geometry.attributes.position.array;
+        const c = geometry.attributes.color.array;
+        
+        currentData.forEach((d, i) => {
+            let tx = d.x, ty = d.y, tz = d.z;
+            const dist = Math.hypot(p[i*3] - pointer.x, p[i*3+1] - pointer.y);
+            if(dist < 15) { // 躲避范围
+                tx += (p[i*3] - pointer.x) * 0.5;
+                ty += (p[i*3+1] - pointer.y) * 0.5;
             }
-
-            // 基础的水波悬浮感
-            targetY += Math.sin(time + i * 0.02) * 1.5;
-            targetX += Math.cos(time + i * 0.02) * 0.8;
-
-            currentArr[idxX] += (targetX - currentArr[idxX]) * 0.12;
-            currentArr[idxY] += (targetY - currentArr[idxY]) * 0.12;
-            currentArr[idxZ] += (targetZ - currentArr[idxZ]) * 0.12;
-        }
-
-        posAttr.needsUpdate = true;
+            p[i*3] += (tx - p[i*3]) * 0.1;
+            p[i*3+1] += (ty - p[i*3+1]) * 0.1;
+            p[i*3+2] += (tz - p[i*3+2]) * 0.1;
+            c[i*3] = d.color.r; c[i*3+1] = d.color.g; c[i*3+2] = d.color.b;
+        });
+        geometry.attributes.position.needsUpdate = true;
         renderer.render(scene, camera);
     }
-
     animate();
-
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        // 同步更新 3D 视野宽高
-        vHeight = 2 * Math.tan(vFov / 2) * 45;
-        vWidth = vHeight * (window.innerWidth / window.innerHeight);
-    });
 </script>
 </body>
 </html>
